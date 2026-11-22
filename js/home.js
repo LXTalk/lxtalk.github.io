@@ -1,6 +1,7 @@
 // ログイン後のホーム(友達・申請・検索・プロフィール)
 // ユーザー入力(表示名など)は必ず textContent で描画し、innerHTML は使わない(XSS対策)
 import { uuid } from './uuid.js';
+import { fmtDate } from './format.js';
 import { normalizeUserId, validateUserId, validateDisplayName } from './validate.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -105,7 +106,7 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     fill('#friends-list', '#friends-empty', (data || []).map((f) => {
       const menu = button('…', '', () => friendMenu(f));
       menu.setAttribute('aria-label', 'メニュー');
-      const li = rowNode(f, [menu]);
+      const li = rowNode(f, [menu], '@' + f.user_id + (f.joined_at ? ` ・ ${fmtDate(f.joined_at)}に登録` : ''));
       if (f.conversation_id) {
         li.classList.add('clickable');
         li.addEventListener('click', (e) => { if (!e.target.closest('button')) onOpenChat(f, { ...me }); });
@@ -257,6 +258,7 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
   function renderMe() {
     $('#btn-avatar').replaceChildren(avatarNode(me, true));
     $('#me-userid').textContent = '@' + me.user_id;
+    $('#me-joined').textContent = me.created_at ? `${fmtDate(me.created_at)}に登録(友達に公開されます)` : '';
     $('#form-profile [name=display_name]').value = me.display_name;
   }
 

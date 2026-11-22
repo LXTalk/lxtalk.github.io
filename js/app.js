@@ -211,7 +211,7 @@ async function enterHome() {
     return show('login');
   }
   const { data: profile, error } = await supabase
-    .from('profiles').select('id, user_id, display_name, avatar_path').eq('id', user.id).maybeSingle();
+    .from('profiles').select('id, user_id, display_name, avatar_path, created_at').eq('id', user.id).maybeSingle();
   if (error && !profile) return show('offline');
   if (!profile) {
     await supabase.auth.signOut();

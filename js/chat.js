@@ -1,6 +1,7 @@
 // チャット画面(1対1)。ユーザー入力は必ず textContent で描画する(XSS対策)
 import { labelFromName, mediaKind, describeFile, formatSize } from './filetype.js';
 import { uuid } from './uuid.js';
+import { fmtDate } from './format.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -15,9 +16,15 @@ export function createChat({ supabase, toast, onClose }) {
   let messages = new Map();
   let hasMore = false;
   let editingId = null;
-  let channel = null;
+  let channel = null;       // メッセージ・既読の変化(DBのRealtime)
+  let typingChannel = null; // 入力中(broadcast)。別チャンネルにして、失敗してもメッセージ受信に影響させない
   let wired = false;
   let busy = false;
+  let reads = new Map();   // 参加者(自分以外) user_id → last_read_at
+  let typingTimer = null;
+  let lastTypingSent = 0;
+  let markTimer = null;
+  let lastMark = 0;
 
   // ---------- 描画 ----------
   const pad = (n) => String(n).padStart(2, '0');
@@ -35,6 +42,13 @@ export function createChat({ supabase, toast, onClose }) {
     if (cls) e.className = cls;
     if (text !== undefined) e.textContent = text;
     return e;
+  }
+
+  // 自分のメッセージを読んだ相手の人数(相手の last_read_at がメッセージ作成以降)
+  function readCount(m) {
+    let n = 0;
+    for (const t of reads.values()) if (t && t >= m.created_at) n++;
+    return n;
   }
 
   function bubbleFor(m) {
@@ -73,6 +87,10 @@ export function createChat({ supabase, toast, onClose }) {
     }
 
     const meta = el('div', 'meta');
+    if (mine && !m.deleted_at) {
+      const n = readCount(m);
+      if (n > 0) meta.appendChild(el('span', 'read', reads.size > 1 ? `既読 ${n}` : '既読'));
+    }
     if (m.edited_at && !m.deleted_at) meta.appendChild(el('span', '', '編集済み'));
     meta.appendChild(el('span', '', timeOf(m.created_at)));
     if (mine && !m.deleted_at) {
@@ -122,8 +140,49 @@ export function createChat({ supabase, toast, onClose }) {
     if (error) return toast('通信エラー');
     merge(data || []);
     hasMore = (data || []).length === PAGE;
+    await loadReads();
     render();
     $('#chat-list').scrollTop = $('#chat-list').scrollHeight;
+    markRead();
+  }
+
+  // ---------- 既読 ----------
+  async function loadReads() {
+    const cid = convId;
+    const { data } = await supabase.from('conversation_members').select('user_id, last_read_at').eq('conversation_id', cid);
+    if (cid !== convId) return;
+    reads = new Map((data || []).filter((r) => r.user_id !== me.id).map((r) => [r.user_id, r.last_read_at]));
+  }
+
+  // 画面を見ているときだけ既読にする(連続呼び出しは間引く)
+  function markRead() {
+    if (!convId || document.visibilityState !== 'visible') return;
+    const wait = 1500 - (Date.now() - lastMark);
+    if (wait > 0) {
+      if (!markTimer) markTimer = setTimeout(() => { markTimer = null; markRead(); }, wait);
+      return;
+    }
+    lastMark = Date.now();
+    supabase.rpc('mark_read', { p_conversation_id: convId });
+  }
+
+  // ---------- 入力中 ----------
+  function showTyping() {
+    $('#chat-typing').hidden = false;
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(hideTyping, 5000);
+  }
+  function hideTyping() {
+    clearTimeout(typingTimer);
+    typingTimer = null;
+    $('#chat-typing').hidden = true;
+  }
+  function sendTyping() {
+    if (!typingChannel || editingId) return;
+    const now = Date.now();
+    if (now - lastTypingSent < 3000) return;     // 3秒に1回まで
+    lastTypingSent = now;
+    typingChannel.send({ type: 'broadcast', event: 'typing', payload: { u: me.id } });
   }
 
   async function loadOlder() {
@@ -143,6 +202,7 @@ export function createChat({ supabase, toast, onClose }) {
     if (data && data.conversation_id === convId) {
       messages.set(data.id, data);
       render();
+      if (data.sender_id !== me.id) { hideTyping(); markRead(); }
     }
   }
 
@@ -321,7 +381,7 @@ export function createChat({ supabase, toast, onClose }) {
     if (wired) return;
     wired = true;
     $('#form-chat').addEventListener('submit', onSubmit);
-    $('#chat-input').addEventListener('input', autosize);
+    $('#chat-input').addEventListener('input', () => { autosize(); if ($('#chat-input').value.trim()) sendTyping(); });
     $('#chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#form-chat').requestSubmit(); }
     });
@@ -364,11 +424,21 @@ export function createChat({ supabase, toast, onClose }) {
     autosize();
     $('#chat-head-avatar').replaceChildren(headAvatar(f));
     $('#chat-title').textContent = f.display_name;
-    $('#chat-sub').textContent = '@' + f.user_id;
+    $('#chat-sub').textContent = '@' + f.user_id + (f.joined_at ? ` ・ ${fmtDate(f.joined_at)}に登録` : '');
     $('#chat-list').replaceChildren();
     loadLatest();
-    // 新着・編集・削除をリアルタイムに反映(RLSにより会話の参加者にだけ届く)
-    channel = supabase.channel('lx-chat-' + convId)
+    // 入力中(broadcast): 会話の参加者だけが送受信できる(サーバー側のRLSで制限)
+    typingChannel = supabase.channel('lx-chat-' + convId, { config: { private: true } })
+      .on('broadcast', { event: 'typing' }, (msg) => { if (msg?.payload?.u && msg.payload.u !== me.id) showTyping(); })
+      .subscribe();
+    // 新着・編集・削除・既読をリアルタイムに反映(RLSにより会話の参加者にだけ届く)
+    channel = supabase.channel('lx-db-' + convId)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'conversation_members', filter: `conversation_id=eq.${convId}` },
+        (payload) => {
+          const r = payload.new;
+          if (r && r.user_id && r.user_id !== me.id) { reads.set(r.user_id, r.last_read_at); render(); }
+        })
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${convId}` },
         (payload) => { const id = payload.new?.id; if (id) fetchOne(id); })
@@ -377,8 +447,12 @@ export function createChat({ supabase, toast, onClose }) {
 
   function close() {
     if (channel) { supabase.removeChannel(channel); channel = null; }
+    if (typingChannel) { supabase.removeChannel(typingChannel); typingChannel = null; }
     convId = null;
     friend = null;
+    reads = new Map();
+    clearTimeout(markTimer); markTimer = null; lastMark = 0; lastTypingSent = 0;
+    hideTyping();
     messages = new Map();
     editingId = null;
     const list = $('#chat-list');
