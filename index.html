@@ -94,6 +94,12 @@
       <p id="friends-empty" class="muted center" hidden>まだ友達がいません。「追加」から友達を探しましょう。</p>
     </div>
 
+    <div id="pane-groups" class="pane" hidden>
+      <button id="btn-new-group" class="primary" type="button">＋ グループを作る</button>
+      <ul id="groups-list" class="rows"></ul>
+      <p id="groups-empty" class="muted center" hidden>まだグループがありません。</p>
+    </div>
+
     <div id="pane-requests" class="pane" hidden>
       <h2 class="section">受信した申請</h2>
       <ul id="req-in" class="rows"></ul>
@@ -153,6 +159,7 @@
 
     <nav class="tabbar" aria-label="メインメニュー">
       <button data-tab="friends" class="active" type="button">友達</button>
+      <button data-tab="groups" type="button">グループ</button>
       <button data-tab="requests" type="button">申請<span id="badge-req" class="badge" hidden>0</span></button>
       <button data-tab="add" type="button">追加</button>
       <button data-tab="me" type="button">自分</button>
@@ -171,11 +178,13 @@
   <section id="view-chat" class="view chat" hidden>
     <header class="chat-head">
       <button id="chat-back" class="back" type="button" aria-label="戻る">‹</button>
-      <span id="chat-head-avatar"></span>
-      <div class="chat-names">
-        <div id="chat-title" class="dn"></div>
-        <div id="chat-sub" class="uid"></div>
-      </div>
+      <button id="chat-head-info" class="head-info" type="button" aria-label="グループの情報" disabled>
+        <span id="chat-head-avatar"></span>
+        <span class="chat-names">
+          <span id="chat-title" class="dn"></span>
+          <span id="chat-sub" class="uid"></span>
+        </span>
+      </button>
     </header>
     <div id="chat-list" class="chat-list" aria-live="polite"></div>
     <div id="chat-typing" class="typing" role="status" hidden>入力中…</div>
@@ -192,6 +201,7 @@
   </section>
 
 </main>
+<dialog id="gdialog" class="gdialog" aria-label="グループ"><div id="gbox"></div></dialog>
 <dialog id="sheet"><p id="sheet-title"></p><div id="sheet-actions"></div></dialog>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <script type="module" src="js/app.js"></script>
