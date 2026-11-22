@@ -24,6 +24,7 @@ export function createChat({ supabase, toast, onClose }) {
   let typingTimer = null;
   let lastTypingSent = 0;
   let markTimer = null;
+  let readsTimer = null;
   let lastMark = 0;
 
   // ---------- 描画 ----------
@@ -47,7 +48,8 @@ export function createChat({ supabase, toast, onClose }) {
   // 自分のメッセージを読んだ相手の人数(相手の last_read_at がメッセージ作成以降)
   function readCount(m) {
     let n = 0;
-    for (const t of reads.values()) if (t && t >= m.created_at) n++;
+    const mt = Date.parse(m.created_at);
+    for (const t of reads.values()) if (t && Date.parse(t) >= mt) n++;
     return n;
   }
 
@@ -73,7 +75,7 @@ export function createChat({ supabase, toast, onClose }) {
         if (kind) {
           const v = el('button', 'btn-sm', kind === 'image' ? '開く' : '再生');
           v.type = 'button';
-          v.addEventListener('click', () => preview(att, kind, v));
+          v.addEventListener('click', () => preview(att, kind));
           acts.appendChild(v);
         }
         const b = el('button', 'btn-sm', 'ダウンロード');
@@ -144,13 +146,15 @@ export function createChat({ supabase, toast, onClose }) {
     render();
     $('#chat-list').scrollTop = $('#chat-list').scrollHeight;
     markRead();
+    prefetchUrls();
   }
 
   // ---------- 既読 ----------
   async function loadReads() {
     const cid = convId;
-    const { data } = await supabase.from('conversation_members').select('user_id, last_read_at').eq('conversation_id', cid);
+    const { data, error } = await supabase.from('conversation_members').select('user_id, last_read_at').eq('conversation_id', cid);
     if (cid !== convId) return;
+    if (error) { warnOnce('既読情報を取得できませんでした', error); return; }
     reads = new Map((data || []).filter((r) => r.user_id !== me.id).map((r) => [r.user_id, r.last_read_at]));
   }
 
@@ -163,7 +167,22 @@ export function createChat({ supabase, toast, onClose }) {
       return;
     }
     lastMark = Date.now();
-    supabase.rpc('mark_read', { p_conversation_id: convId });
+    supabase.rpc('mark_read', { p_conversation_id: convId }).then(({ data, error }) => {
+      if (error || data !== true) warnOnce('既読を記録できませんでした', error || { message: 'false' });
+    });
+  }
+
+  // 失敗してもユーザーには表示しない(開発者向けにコンソールにだけ残す)
+  function warnOnce(msg, err) {
+    console.warn('[LXTalk]', msg, err && (err.code || err.message));
+  }
+
+  // 相手の既読を定期的に確認(リアルタイムが届かない環境のための保険)
+  async function refreshReads() {
+    if (!convId || document.visibilityState !== 'visible') return;
+    const before = JSON.stringify([...reads]);
+    await loadReads();
+    if (JSON.stringify([...reads]) !== before) render();
   }
 
   // ---------- 入力中 ----------
@@ -203,6 +222,7 @@ export function createChat({ supabase, toast, onClose }) {
       messages.set(data.id, data);
       render();
       if (data.sender_id !== me.id) { hideTyping(); markRead(); }
+      prefetchUrls();
     }
   }
 
@@ -230,6 +250,7 @@ export function createChat({ supabase, toast, onClose }) {
         if (!data) return toast('送信できませんでした');
         ta.value = '';
         autosize();
+        ta.focus();   // 送信してもキーボードを閉じない
         await fetchOne(data);
       }
     } finally {
@@ -319,33 +340,66 @@ export function createChat({ supabase, toast, onClose }) {
     }
   }
 
+  // 署名付きURLは会話を開いたときにまとめて取得しておく(クリック時の待ち時間をなくす)
+  const urlCache = new Map();   // storage_path → { url, exp }
+  const URL_SEC = 1800;
+  async function signedUrl(path) {
+    const c = urlCache.get(path);
+    if (c && c.exp > Date.now() + 60000) return c.url;
+    const { data, error } = await supabase.storage.from('chat-files').createSignedUrl(path, URL_SEC);
+    if (error || !data?.signedUrl) return null;
+    urlCache.set(path, { url: data.signedUrl, exp: Date.now() + URL_SEC * 1000 });
+    return data.signedUrl;
+  }
+  async function prefetchUrls() {
+    const store = supabase.storage.from('chat-files');
+    if (!store.createSignedUrls) return;
+    const paths = sorted().slice(-60).filter((m) => !m.deleted_at).flatMap((m) => m.attachments || [])
+      .filter((a) => !a.file_deleted_at && mediaKind(a.original_name) && !urlCache.has(a.storage_path))
+      .map((a) => a.storage_path).slice(-20);
+    if (!paths.length) return;
+    const cid = convId;
+    const { data } = await store.createSignedUrls(paths, URL_SEC);
+    if (cid !== convId) return;
+    for (const r of data || []) if (r.signedUrl && !r.error) urlCache.set(r.path, { url: r.signedUrl, exp: Date.now() + URL_SEC * 1000 });
+  }
+
   // 画像・動画・音声(拡張子で判断)は、ダウンロードとは別に画面内で全画面表示する
-  async function preview(att, kind, btn) {
-    btn.disabled = true;
-    try {
-      // 動画のシーク再生に備えて、ダウンロード用より長めの署名付きURL(30分)。download指定なし=ブラウザ内で表示
-      const { data, error } = await supabase.storage.from('chat-files').createSignedUrl(att.storage_path, 1800);
-      if (error || !data?.signedUrl) return toast('表示できませんでした');
-      const dlg = $('#viewer');
-      const box = $('#viewer-media');
-      const m = document.createElement(kind === 'image' ? 'img' : kind === 'video' ? 'video' : 'audio');
-      m.className = 'viewer-' + kind;
-      if (kind !== 'image') { m.controls = true; m.autoplay = true; m.playsInline = true; }
-      else m.alt = att.original_name;
-      m.addEventListener('error', () => toast('このファイルはブラウザで表示できません。ダウンロードをお試しください'));
-      m.src = data.signedUrl;
-      box.replaceChildren(m);
-      $('#viewer-name').textContent = att.original_name;
-      $('#viewer-dl').onclick = (ev) => download(att, ev.currentTarget);
-      if (!dlg.open) dlg.showModal();
-    } finally {
-      btn.disabled = false;
-    }
+  let viewToken = 0;
+  async function preview(att, kind) {
+    const token = ++viewToken;
+    const dlg = $('#viewer');
+    const box = $('#viewer-media');
+    // 押した瞬間に全画面を開き、「読み込み中」を出す(体感の待ち時間を短くする)
+    const spin = el('div', 'viewer-loading', '読み込み中…');
+    box.replaceChildren(spin);
+    $('#viewer-name').textContent = att.original_name;
+    $('#viewer-dl').onclick = (ev) => download(att, ev.currentTarget);
+    if (!dlg.open) dlg.showModal();
+    const url = await signedUrl(att.storage_path);
+    if (token !== viewToken || !dlg.open) return;           // 待っている間に閉じられた
+    if (!url) { spin.textContent = '表示できませんでした'; return; }
+    const m = document.createElement(kind === 'image' ? 'img' : kind === 'video' ? 'video' : 'audio');
+    m.className = 'viewer-' + kind;
+    m.hidden = kind === 'image';                            // 画像は読み込みが終わってから表示(途中の崩れた表示を避ける)
+    if (kind !== 'image') { m.controls = true; m.autoplay = true; m.playsInline = true; m.preload = 'auto'; }
+    else { m.alt = att.original_name; m.decoding = 'async'; }
+    const ready = () => { if (token === viewToken) { spin.remove(); m.hidden = false; } };
+    m.addEventListener(kind === 'image' ? 'load' : 'loadeddata', ready, { once: true });
+    if (kind === 'audio') m.addEventListener('loadedmetadata', ready, { once: true });
+    m.addEventListener('error', () => {
+      if (token !== viewToken) return;
+      spin.textContent = 'このファイルはブラウザで表示できません。ダウンロードをお試しください';
+      m.remove();
+    });
+    m.src = url;
+    box.appendChild(m);
   }
 
   function closeViewer() {
     const dlg = $('#viewer');
     const box = $('#viewer-media');
+    viewToken++;
     box.querySelectorAll('video,audio').forEach((m) => { m.pause(); m.removeAttribute('src'); m.load(); });
     box.replaceChildren();
     if (dlg.open) dlg.close();
@@ -374,7 +428,11 @@ export function createChat({ supabase, toast, onClose }) {
   function autosize() {
     const ta = $('#chat-input');
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+    // box-sizing: border-box のため、枠線(上下)の分も高さに含める。含めないと1行でも2pxあふれてスクロールしてしまう
+    const h = ta.scrollHeight + (ta.offsetHeight - ta.clientHeight);
+    ta.style.height = Math.min(h, 140) + 'px';
+    // 上限(140px)に達するまでは内部スクロールさせない
+    ta.style.overflowY = h > 140 ? 'auto' : 'hidden';
   }
 
   function wire() {
@@ -388,6 +446,8 @@ export function createChat({ supabase, toast, onClose }) {
     $('#chat-attach').addEventListener('click', () => $('#file-chat').click());
     $('#file-chat').addEventListener('change', onPickFile);
     $('#chat-back').addEventListener('click', () => { close(); onClose(); });
+    // 送信・添付ボタンを押しても入力欄からフォーカスを奪わない(スマホでキーボードが閉じるのを防ぐ)
+    for (const id of ['#chat-send', '#chat-attach']) $(id).addEventListener('mousedown', (ev) => ev.preventDefault());
     $('#viewer-close').addEventListener('click', closeViewer);
     $('#viewer').addEventListener('cancel', (ev) => { ev.preventDefault(); closeViewer(); });
     $('#viewer').addEventListener('click', (ev) => { if (ev.target.id === 'viewer') closeViewer(); });
@@ -426,6 +486,8 @@ export function createChat({ supabase, toast, onClose }) {
     $('#chat-title').textContent = f.display_name;
     $('#chat-sub').textContent = '@' + f.user_id + (f.joined_at ? ` ・ ${fmtDate(f.joined_at)}に登録` : '');
     $('#chat-list').replaceChildren();
+    clearInterval(readsTimer);
+    readsTimer = setInterval(refreshReads, 10000);
     loadLatest();
     // 入力中(broadcast): 会話の参加者だけが送受信できる(サーバー側のRLSで制限)
     typingChannel = supabase.channel('lx-chat-' + convId, { config: { private: true } })
@@ -451,6 +513,8 @@ export function createChat({ supabase, toast, onClose }) {
     convId = null;
     friend = null;
     reads = new Map();
+    clearInterval(readsTimer); readsTimer = null;
+    urlCache.clear();
     clearTimeout(markTimer); markTimer = null; lastMark = 0; lastTypingSent = 0;
     hideTyping();
     messages = new Map();

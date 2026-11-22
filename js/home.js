@@ -6,7 +6,7 @@ import { normalizeUserId, validateUserId, validateDisplayName } from './validate
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const GENERIC_ERR = '通信エラー';
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_MAX_BYTES = 10 * 1024 * 1024;   // 選べる元画像の上限(端末側で256pxに縮小するので、保存されるのは小さい画像)
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const TITLES = { friends: '友達', requests: '友達申請', add: '友達を追加', me: 'プロフィール' };
 
@@ -308,7 +308,7 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     e.target.value = '';
     if (!file) return;
     if (!AVATAR_TYPES.includes(file.type)) return toast('JPEG・PNG・WebP の画像を選んでください');
-    if (file.size > AVATAR_MAX_BYTES) return toast('画像は2MB以下にしてください');
+    if (file.size > AVATAR_MAX_BYTES) return toast('画像は10MB以下にしてください');
 
     let processed;
     try { processed = await toAvatarBlob(file); }
