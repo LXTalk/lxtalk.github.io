@@ -159,3 +159,5 @@ dialog.viewer[open] { display: flex; flex-direction: column; }
 .typing { font-size: 13px; color: var(--muted); padding: 2px 4px; }
 .typing[hidden] { display: none; }
 .meta .read { color: var(--blue); font-weight: 600; }
+.viewer-loading { color: #ddd; padding: 24px; text-align: center; }
+.composer textarea { overflow-y: hidden; }
