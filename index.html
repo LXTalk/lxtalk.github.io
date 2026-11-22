@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a84ff">
+<title>LXTalk</title>
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LXTalk">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="offline-bar" class="offline-bar" role="status" hidden>オフラインです。接続すると使えるようになります</div>
+<main id="app">
+
+  <section id="view-loading" class="view" aria-live="polite">
+    <img class="logo" src="icons/icon-192.png" alt="LXTalk">
+  </section>
+
+  <section id="view-offline" class="view" hidden>
+    <img class="logo" src="icons/icon-192.png" alt="LXTalk">
+    <h1>接続できません</h1>
+    <p class="lead">インターネットに接続されていないか、サーバーに接続できません。<br>接続が戻ると自動で再開します。</p>
+    <button id="btn-retry" class="primary" type="button">再接続する</button>
+  </section>
+
+  <section id="view-login" class="view" hidden>
+    <img class="logo" src="icons/icon-192.png" alt="LXTalk">
+    <h1>ログイン</h1>
+    <form id="form-login" novalidate>
+      <label>メールアドレス
+        <input name="email" type="email" autocomplete="email" inputmode="email" required>
+      </label>
+      <label>パスワード
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <p class="error" role="alert"></p>
+      <button class="primary" type="submit">ログイン</button>
+    </form>
+    <button class="link" data-go="signup">アカウントを作成する</button>
+  </section>
+
+  <section id="view-signup" class="view" hidden>
+    <img class="logo" src="icons/icon-192.png" alt="LXTalk">
+    <h1>アカウント作成</h1>
+    <form id="form-signup" novalidate>
+      <label>メールアドレス
+        <input name="email" type="email" autocomplete="email" inputmode="email" required>
+      </label>
+      <label>ユーザーID
+        <input name="user_id" type="text" autocapitalize="none" autocomplete="username" spellcheck="false" maxlength="20" required>
+        <small>半角英数字とアンダースコア、3〜20文字。登録後は変更できません</small>
+      </label>
+      <label>表示名
+        <input name="display_name" type="text" maxlength="30" autocomplete="nickname" required>
+      </label>
+      <label>パスワード
+        <input name="password" type="password" autocomplete="new-password" minlength="8" required>
+        <small>8文字以上</small>
+      </label>
+      <p class="error" role="alert"></p>
+      <button class="primary" type="submit">認証コードを送信</button>
+    </form>
+    <button class="link" data-go="login">ログインに戻る</button>
+  </section>
+
+  <section id="view-verify" class="view" hidden>
+    <img class="logo" src="icons/icon-192.png" alt="LXTalk">
+    <h1>メール認証</h1>
+    <p class="lead"><span id="verify-email"></span> に6桁の認証コードを送信しました。</p>
+    <form id="form-verify" novalidate>
+      <label>認証コード
+        <input name="code" class="otp" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" required>
+      </label>
+      <p class="error" role="alert"></p>
+      <button class="primary" type="submit">認証する</button>
+    </form>
+    <button class="link" id="btn-resend" type="button">コードを再送信する</button>
+    <button class="link" data-go="login" type="button">ログインに戻る</button>
+  </section>
+
+  <section id="view-home" class="view home" hidden>
+    <header class="topbar">
+      <img class="mini-logo" src="icons/icon-192.png" alt="">
+      <h1 id="home-title">友達</h1>
+    </header>
+
+    <div id="pane-friends" class="pane">
+      <ul id="friends-list" class="rows"></ul>
+      <p id="friends-empty" class="muted center" hidden>まだ友達がいません。「追加」から友達を探しましょう。</p>
+    </div>
+
+    <div id="pane-requests" class="pane" hidden>
+      <h2 class="section">受信した申請</h2>
+      <ul id="req-in" class="rows"></ul>
+      <p id="req-in-empty" class="muted center" hidden>受信した申請はありません</p>
+      <h2 class="section">送信した申請</h2>
+      <ul id="req-out" class="rows"></ul>
+      <p id="req-out-empty" class="muted center" hidden>送信した申請はありません</p>
+    </div>
+
+    <div id="pane-add" class="pane" hidden>
+      <form id="form-search" novalidate>
+        <label>相手のユーザーID(完全一致)
+          <input name="q" type="text" autocapitalize="none" autocomplete="off" spellcheck="false" maxlength="20" placeholder="例: user_12345">
+        </label>
+        <p class="error" role="alert"></p>
+        <button class="primary" type="submit">検索</button>
+      </form>
+      <ul id="search-result" class="rows"></ul>
+      <p id="search-empty" class="muted center" hidden>該当するユーザーが見つかりませんでした</p>
+    </div>
+
+    <div id="pane-me" class="pane" hidden>
+      <div class="profile-head">
+        <button id="btn-avatar" class="avatar-btn" type="button" aria-label="アイコンを変更"></button>
+        <input id="file-avatar" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <div class="muted" id="me-userid"></div>
+      </div>
+      <form id="form-profile" novalidate>
+        <label>表示名
+          <input name="display_name" type="text" maxlength="30" autocomplete="nickname">
+        </label>
+        <p class="error" role="alert"></p>
+        <button class="primary" type="submit">保存</button>
+      </form>
+      <h2 class="section">通知</h2>
+      <div id="push-box" hidden>
+        <p id="push-text" class="muted"></p>
+        <button id="btn-push" class="btn-sm accent" type="button" hidden></button>
+      </div>
+      <h2 class="section">アプリ</h2>
+      <div id="install-box" hidden>
+        <p class="muted" id="install-text">ホーム画面に追加すると、アプリのように起動できます。</p>
+        <button id="btn-install" class="btn-sm accent" type="button" hidden>アプリとしてインストール</button>
+      </div>
+      <h2 class="section">ブロック中のユーザー</h2>
+      <ul id="block-list" class="rows"></ul>
+      <p id="block-empty" class="muted center" hidden>ブロック中のユーザーはいません</p>
+      <button class="link danger" id="btn-logout" type="button">ログアウト</button>
+    </div>
+
+    <div id="push-banner" class="banner" hidden>
+      <span>新着メッセージを通知で受け取りますか?</span>
+      <button id="push-banner-yes" class="btn-sm accent" type="button">オン</button>
+      <button id="push-banner-no" class="btn-sm" type="button">あとで</button>
+    </div>
+
+    <nav class="tabbar" aria-label="メインメニュー">
+      <button data-tab="friends" class="active" type="button">友達</button>
+      <button data-tab="requests" type="button">申請<span id="badge-req" class="badge" hidden>0</span></button>
+      <button data-tab="add" type="button">追加</button>
+      <button data-tab="me" type="button">自分</button>
+    </nav>
+  </section>
+
+  <dialog id="viewer" class="viewer" aria-label="ファイルの表示">
+    <div class="viewer-bar">
+      <span id="viewer-name"></span>
+      <button id="viewer-dl" class="btn-sm" type="button">ダウンロード</button>
+      <button id="viewer-close" class="btn-sm" type="button" aria-label="閉じる">✕</button>
+    </div>
+    <div id="viewer-media" class="viewer-media"></div>
+  </dialog>
+
+  <section id="view-chat" class="view chat" hidden>
+    <header class="chat-head">
+      <button id="chat-back" class="back" type="button" aria-label="戻る">‹</button>
+      <span id="chat-head-avatar"></span>
+      <div class="chat-names">
+        <div id="chat-title" class="dn"></div>
+        <div id="chat-sub" class="uid"></div>
+      </div>
+    </header>
+    <div id="chat-list" class="chat-list" aria-live="polite"></div>
+    <div id="chat-edit-bar" class="edit-bar" hidden>
+      <span>メッセージを編集中</span>
+      <button id="chat-edit-cancel" class="link" type="button">キャンセル</button>
+    </div>
+    <form id="form-chat" class="composer" novalidate>
+      <button id="chat-attach" class="attach" type="button" aria-label="ファイルを添付">＋</button>
+      <input id="file-chat" type="file" hidden>
+      <textarea id="chat-input" rows="1" maxlength="4000" placeholder="メッセージ" aria-label="メッセージ"></textarea>
+      <button id="chat-send" class="primary" type="submit">送信</button>
+    </form>
+  </section>
+
+</main>
+<dialog id="sheet"><p id="sheet-title"></p><div id="sheet-actions"></div></dialog>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
