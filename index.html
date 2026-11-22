@@ -120,6 +120,7 @@
         <button id="btn-avatar" class="avatar-btn" type="button" aria-label="アイコンを変更"></button>
         <input id="file-avatar" type="file" accept="image/jpeg,image/png,image/webp" hidden>
         <div class="muted" id="me-userid"></div>
+        <div class="muted small" id="me-joined"></div>
       </div>
       <form id="form-profile" novalidate>
         <label>表示名
@@ -177,6 +178,7 @@
       </div>
     </header>
     <div id="chat-list" class="chat-list" aria-live="polite"></div>
+    <div id="chat-typing" class="typing" role="status" hidden>入力中…</div>
     <div id="chat-edit-bar" class="edit-bar" hidden>
       <span>メッセージを編集中</span>
       <button id="chat-edit-cancel" class="link" type="button">キャンセル</button>

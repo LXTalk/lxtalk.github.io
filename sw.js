@@ -1,9 +1,9 @@
 // LXTalk Service Worker: ①アプリ本体のキャッシュ(オフラインでも画面を開ける) ②Web Push
 // 個人データ(メッセージ・ファイル・認証・API応答)は一切キャッシュしない。
-const CACHE = 'lxtalk-shell-v1';
+const CACHE = 'lxtalk-shell-v3';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/app.js', 'js/config.js', 'js/validate.js', 'js/home.js', 'js/chat.js', 'js/push.js', 'js/filetype.js', 'js/uuid.js',
+  'js/app.js', 'js/config.js', 'js/validate.js', 'js/home.js', 'js/chat.js', 'js/push.js', 'js/filetype.js', 'js/uuid.js', 'js/format.js',
   'icons/icon-192.png', 'icons/icon-512.png',
 ];
 // 外部で読み込む公開ライブラリ(認証・データには無関係)だけは例外的にキャッシュする
