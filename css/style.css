@@ -161,3 +161,23 @@ dialog.viewer[open] { display: flex; flex-direction: column; }
 .meta .read { color: var(--blue); font-weight: 600; }
 .viewer-loading { color: #ddd; padding: 24px; text-align: center; }
 .composer textarea { overflow-y: hidden; }
+
+/* ---- グループ ---- */
+.head-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; }
+.head-info:disabled { opacity: 1; color: inherit; }
+.head-info.tappable { cursor: pointer; }
+.chat-names { display: block; flex: 1; }
+.chat-names .dn, .chat-names .uid { display: block; }
+.sys { align-self: center; max-width: 90%; text-align: center; font-size: 12px; color: var(--muted); background: var(--line); border-radius: 10px; padding: 3px 12px; margin: 6px 0; overflow-wrap: anywhere; }
+.sender { font-size: 12px; color: var(--muted); margin: 0 0 2px 6px; }
+dialog.gdialog { max-height: 88dvh; overflow-y: auto; }
+.gtitle { margin: 0 0 8px; font-size: 18px; overflow-wrap: anywhere; }
+#gbox input[type=text] { width: 100%; box-sizing: border-box; font: inherit; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--fg); margin-bottom: 8px; }
+#gbox .row input[type=checkbox] { width: 22px; height: 22px; flex: none; }
+#gbox .row label { cursor: pointer; }
+.gbtns, .gactions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 12px; }
+.gactions { justify-content: flex-start; }
+.gbtns .primary { min-height: 40px; padding: 0 16px; border-radius: 10px; }
+.tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 1px 8px; flex: none; }
+#btn-new-group { width: 100%; margin-bottom: 8px; }
+.small { font-size: 13px; }
