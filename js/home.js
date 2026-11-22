@@ -2,19 +2,22 @@
 // ユーザー入力(表示名など)は必ず textContent で描画し、innerHTML は使わない(XSS対策)
 import { uuid } from './uuid.js';
 import { fmtDate } from './format.js';
+import { createGroupUI } from './group.js';
 import { normalizeUserId, validateUserId, validateDisplayName } from './validate.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const GENERIC_ERR = '通信エラー';
 const AVATAR_MAX_BYTES = 10 * 1024 * 1024;   // 選べる元画像の上限(端末側で256pxに縮小するので、保存されるのは小さい画像)
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const TITLES = { friends: '友達', requests: '友達申請', add: '友達を追加', me: 'プロフィール' };
+const TITLES = { friends: '友達', groups: 'グループ', requests: '友達申請', add: '友達を追加', me: 'プロフィール' };
 
 export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
   let me = null; // { id, user_id, display_name, avatar_path }
   let channel = null;
   let refreshTimer = null;
   let wired = false;
+  let groupChannel = null;
+  const groupUI = createGroupUI({ supabase, toast });
 
   // ---------- 描画ヘルパー ----------
   function avatarUrl(path) {
@@ -115,6 +118,20 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     }));
   }
 
+  async function loadGroups() {
+    const { data, error } = await supabase.rpc('get_groups');
+    if (error) return toast(GENERIC_ERR);
+    groups = data || [];
+    fill('#groups-list', '#groups-empty', groups.map((g) => {
+      const li = rowNode({ display_name: g.name }, [], `${g.member_count}人`);
+      li.classList.add('clickable');
+      li.addEventListener('click', () => onOpenChat(toGroupObj(g), { ...me }));
+      return li;
+    }));
+  }
+  let groups = [];
+  const toGroupObj = (g) => ({ type: 'group', conversation_id: g.conversation_id, display_name: g.name, member_count: g.member_count, role: g.role });
+
   function friendMenu(f) {
     openSheet(`${f.display_name} (@${f.user_id})`, [
       { label: 'ブロックする', danger: true, run: () => confirmBlock(f) },
@@ -188,7 +205,7 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
   }
 
   function refreshAll() {
-    return Promise.all([loadFriends(), loadRequests(), loadBlocks()]);
+    return Promise.all([loadFriends(), loadGroups(), loadRequests(), loadBlocks()]);
   }
 
   function refreshSoon() {
@@ -394,6 +411,12 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     wired = true;
     document.querySelectorAll('.tabbar button').forEach((b) =>
       b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    $('#btn-new-group').addEventListener('click', () => groupUI.openCreate({
+      onCreated: (convId, name, n) => {
+        toast('グループを作成しました');
+        refreshAll();
+        onOpenChat({ type: 'group', conversation_id: convId, display_name: name, member_count: n, role: 'owner' }, { ...me });
+      } }));
     $('#form-search').addEventListener('submit', onSearch);
     $('#form-profile').addEventListener('submit', onSaveProfile);
     $('#btn-avatar').addEventListener('click', () => $('#file-avatar').click());
@@ -425,19 +448,31 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
       channel = supabase.channel('lx-friend-requests')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, refreshSoon)
         .subscribe();
+      // グループへの追加・削除・退出を反映(自分の参加行の変化のみ届く)
+      if (groupChannel) supabase.removeChannel(groupChannel);
+      groupChannel = supabase.channel('lx-groups-' + me.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${me.id}` }, refreshSoon)
+        .subscribe();
     },
+    refresh() { return refreshAll(); },
     getMe() { return me ? { ...me } : null; },
     goTab(name) { if (TITLES[name]) switchTab(name); },
     async friendByConv(convId) {
       const { data } = await supabase.rpc('get_friends');
-      return (data || []).find((f) => f.conversation_id === convId) || null;
+      const f = (data || []).find((x) => x.conversation_id === convId);
+      if (f) return f;
+      const g = await supabase.rpc('get_groups');
+      const hit = (g.data || []).find((x) => x.conversation_id === convId);
+      return hit ? toGroupObj(hit) : null;
     },
     unmount() {
       clearTimeout(refreshTimer);
       if (channel) { supabase.removeChannel(channel); channel = null; }
+      if (groupChannel) { supabase.removeChannel(groupChannel); groupChannel = null; }
+      groupUI.close();
       me = null;
       $('#push-banner').hidden = true;
-      for (const id of ['#friends-list', '#req-in', '#req-out', '#search-result', '#block-list']) {
+      for (const id of ['#friends-list', '#groups-list', '#req-in', '#req-out', '#search-result', '#block-list']) {
         $(id).replaceChildren();
       }
       $('#form-search').reset();

@@ -19,7 +19,7 @@ const supabase = configured
   : null;
 
 const push = supabase && VAPID_PUBLIC_KEY ? createPush({ supabase, vapidKey: VAPID_PUBLIC_KEY }) : null;
-const chat = supabase ? createChat({ supabase, toast, onClose: () => show('home') }) : null;
+const chat = supabase ? createChat({ supabase, toast, onClose: () => show('home'), onGroupsChanged: () => home.refresh() }) : null;
 const home = supabase ? createHome({
   supabase, toast,
   push,

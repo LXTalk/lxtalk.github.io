@@ -2,6 +2,7 @@
 import { labelFromName, mediaKind, describeFile, formatSize } from './filetype.js';
 import { uuid } from './uuid.js';
 import { fmtDate } from './format.js';
+import { createGroupUI } from './group.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -9,9 +10,14 @@ const PAGE = 50;
 const COLS = 'id, conversation_id, sender_id, kind, body, edited_at, deleted_at, created_at, '
   + 'attachments(id, storage_path, type_label, original_name, size_bytes, file_deleted_at)';
 
-export function createChat({ supabase, toast, onClose }) {
+export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {} }) {
+  const groupUI = createGroupUI({ supabase, toast });
   let me = null;      // { id, ... }
-  let friend = null;  // { user_id, display_name, avatar_path, conversation_id }
+  let friend = null;  // 友達 { user_id, display_name, avatar_path, conversation_id } またはグループ { type:'group', conversation_id, display_name, role }
+  let isGroup = false;
+  let members = new Map(); // グループ: member_id(uuid) → { user_id, display_name, role, is_member }
+  let typers = new Map();  // グループ: 入力中の相手 uuid → 消去タイマー
+  let membersLoading = null;
   let convId = null;
   let messages = new Map();
   let hasMore = false;
@@ -53,7 +59,65 @@ export function createChat({ supabase, toast, onClose }) {
     return n;
   }
 
+  // ---------- グループ ----------
+  function nameOf(uuidv) {
+    if (uuidv === me.id) return 'あなた';
+    const m = members.get(uuidv);
+    return m ? m.display_name : '退出したメンバー';
+  }
+  function systemText(m) {
+    const who = nameOf(m.sender_id);
+    const b = String(m.body || '');
+    if (b === 'created') return `${who}がグループを作成しました`;
+    if (b === 'left') return `${who}が退出しました`;
+    if (b.startsWith('added:')) return `${who}が${nameOf(b.slice(6))}を追加しました`;
+    if (b.startsWith('removed:')) return `${who}が${nameOf(b.slice(8))}を削除しました`;
+    if (b.startsWith('renamed:')) return `${who}がグループ名を「${b.slice(8)}」に変更しました`;
+    return '';
+  }
+  function activeCount() { let n = 0; for (const v of members.values()) if (v.is_member) n++; return n; }
+  function renderHeadSub() {
+    if (isGroup) $('#chat-sub').textContent = `${activeCount()}人`;
+  }
+  async function loadMembers() {
+    if (!isGroup) return;
+    const cid = convId;
+    const { data, error } = await supabase.rpc('get_group_members', { p_conversation_id: cid });
+    if (cid !== convId || error) return;
+    members = new Map((data || []).map((r) => [r.member_id, r]));
+    renderHeadSub();
+  }
+  // 知らない送信者や、メンバー構成が変わるシステムメッセージが来たらメンバー表を取り直す
+  function needsMembers(m) {
+    if (!isGroup) return false;
+    if (m.kind === 'system') return true;
+    return m.sender_id !== me.id && !members.has(m.sender_id);
+  }
+  async function refreshMembers() {
+    if (!membersLoading) membersLoading = loadMembers().finally(() => { membersLoading = null; });
+    await membersLoading;
+  }
+  function groupGone() {
+    toast('このグループは利用できなくなりました');
+    close();
+    onClose();
+    onGroupsChanged();
+  }
+  function openGroupInfo() {
+    if (!isGroup || !convId) return;
+    groupUI.openInfo({
+      group: friend, members: [...members.values()], meId: me.id,
+      onChanged: (newName) => {
+        if (newName) { $('#chat-title').textContent = newName; }
+        onGroupsChanged();
+        refreshMembers().then(loadLatest);
+      },
+      onGone: () => { close(); onClose(); onGroupsChanged(); },
+    });
+  }
+
   function bubbleFor(m) {
+    if (m.kind === 'system') return el('div', 'sys', systemText(m));
     const mine = m.sender_id === me.id;
     const row = el('div', 'msg ' + (mine ? 'mine' : 'theirs'));
     row.dataset.id = m.id;
@@ -103,6 +167,7 @@ export function createChat({ supabase, toast, onClose }) {
       meta.prepend(more);
     }
     const wrap = el('div', 'bwrap');
+    if (isGroup && !mine) wrap.appendChild(el('div', 'sender', nameOf(m.sender_id)));
     wrap.append(bubble, meta);
     row.appendChild(wrap);
     return row;
@@ -142,7 +207,7 @@ export function createChat({ supabase, toast, onClose }) {
     if (error) return toast('通信エラー');
     merge(data || []);
     hasMore = (data || []).length === PAGE;
-    await loadReads();
+    await Promise.all([loadReads(), isGroup ? refreshMembers() : null]);
     render();
     $('#chat-list').scrollTop = $('#chat-list').scrollHeight;
     markRead();
@@ -155,6 +220,8 @@ export function createChat({ supabase, toast, onClose }) {
     const { data, error } = await supabase.from('conversation_members').select('user_id, last_read_at').eq('conversation_id', cid);
     if (cid !== convId) return;
     if (error) { warnOnce('既読情報を取得できませんでした', error); return; }
+    // グループから削除された・グループが削除された場合、参加者の行が1件も見えなくなる
+    if (isGroup && (data || []).length === 0) { groupGone(); return; }
     reads = new Map((data || []).filter((r) => r.user_id !== me.id).map((r) => [r.user_id, r.last_read_at]));
   }
 
@@ -186,12 +253,33 @@ export function createChat({ supabase, toast, onClose }) {
   }
 
   // ---------- 入力中 ----------
-  function showTyping() {
+  function showTyping(uid) {
+    if (isGroup && uid) {
+      clearTimeout(typers.get(uid));
+      typers.set(uid, setTimeout(() => { typers.delete(uid); renderTyping(); }, 5000));
+      renderTyping();
+      return;
+    }
     $('#chat-typing').hidden = false;
     clearTimeout(typingTimer);
     typingTimer = setTimeout(hideTyping, 5000);
   }
-  function hideTyping() {
+  function renderTyping() {
+    const box = $('#chat-typing');
+    const ids = [...typers.keys()];
+    if (!ids.length) { box.hidden = true; return; }
+    const names = ids.map((u) => { const m = members.get(u); return m ? m.display_name : null; });
+    box.textContent = ids.length === 1 ? `${names[0] || 'メンバー'}が入力中…`
+      : ids.length === 2 && names[0] && names[1] ? `${names[0]}、${names[1]}が入力中…` : `${ids.length}人が入力中…`;
+    box.hidden = false;
+  }
+  function hideTyping(uid) {
+    if (isGroup) {
+      if (uid) { clearTimeout(typers.get(uid)); typers.delete(uid); }
+      else { for (const t of typers.values()) clearTimeout(t); typers.clear(); }
+      renderTyping();
+      return;
+    }
     clearTimeout(typingTimer);
     typingTimer = null;
     $('#chat-typing').hidden = true;
@@ -220,8 +308,10 @@ export function createChat({ supabase, toast, onClose }) {
     const { data } = await supabase.from('messages').select(COLS).eq('id', id).maybeSingle();
     if (data && data.conversation_id === convId) {
       messages.set(data.id, data);
+      if (needsMembers(data)) await refreshMembers();
+      if (data.conversation_id !== convId) return;
       render();
-      if (data.sender_id !== me.id) { hideTyping(); markRead(); }
+      if (data.sender_id !== me.id) { hideTyping(data.sender_id); markRead(); }
       prefetchUrls();
     }
   }
@@ -452,6 +542,7 @@ export function createChat({ supabase, toast, onClose }) {
     $('#viewer').addEventListener('cancel', (ev) => { ev.preventDefault(); closeViewer(); });
     $('#viewer').addEventListener('click', (ev) => { if (ev.target.id === 'viewer') closeViewer(); });
     $('#chat-edit-cancel').addEventListener('click', cancelEdit);
+    $('#chat-head-info').addEventListener('click', openGroupInfo);
     document.addEventListener('visibilitychange', () => {
       if (convId && document.visibilityState === 'visible') loadLatest();
     });
@@ -474,7 +565,12 @@ export function createChat({ supabase, toast, onClose }) {
     close();
     me = meProfile;
     friend = f;
+    isGroup = f.type === 'group';
+    members = new Map();
+    typers = new Map();
     convId = f.conversation_id;
+    $('#chat-head-info').classList.toggle('tappable', isGroup);
+    $('#chat-head-info').disabled = !isGroup;
     messages = new Map();
     hasMore = false;
     editingId = null;
@@ -484,14 +580,15 @@ export function createChat({ supabase, toast, onClose }) {
     autosize();
     $('#chat-head-avatar').replaceChildren(headAvatar(f));
     $('#chat-title').textContent = f.display_name;
-    $('#chat-sub').textContent = '@' + f.user_id + (f.joined_at ? ` ・ ${fmtDate(f.joined_at)}に登録` : '');
+    $('#chat-sub').textContent = isGroup ? `${f.member_count || ''}${f.member_count ? '人' : ''}`
+      : '@' + f.user_id + (f.joined_at ? ` ・ ${fmtDate(f.joined_at)}に登録` : '');
     $('#chat-list').replaceChildren();
     clearInterval(readsTimer);
     readsTimer = setInterval(refreshReads, 10000);
     loadLatest();
     // 入力中(broadcast): 会話の参加者だけが送受信できる(サーバー側のRLSで制限)
     typingChannel = supabase.channel('lx-chat-' + convId, { config: { private: true } })
-      .on('broadcast', { event: 'typing' }, (msg) => { if (msg?.payload?.u && msg.payload.u !== me.id) showTyping(); })
+      .on('broadcast', { event: 'typing' }, (msg) => { if (msg?.payload?.u && msg.payload.u !== me.id) showTyping(msg.payload.u); })
       .subscribe();
     // 新着・編集・削除・既読をリアルタイムに反映(RLSにより会話の参加者にだけ届く)
     channel = supabase.channel('lx-db-' + convId)
@@ -511,7 +608,12 @@ export function createChat({ supabase, toast, onClose }) {
     if (channel) { supabase.removeChannel(channel); channel = null; }
     if (typingChannel) { supabase.removeChannel(typingChannel); typingChannel = null; }
     convId = null;
+    hideTyping();
     friend = null;
+    isGroup = false;
+    members = new Map();
+    typers = new Map();
+    groupUI.close();
     reads = new Map();
     clearInterval(readsTimer); readsTimer = null;
     urlCache.clear();
