@@ -198,3 +198,10 @@ dialog.gdialog { max-height: 88dvh; overflow-y: auto; }
 .reply-info .q-name { color: var(--fg); }
 .gicon { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .gicon-btns { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+/* ---- グループ: 送信者のアイコン ---- */
+.avatar.sm { width: 32px; height: 32px; font-size: 14px; }
+.brow { display: flex; align-items: flex-start; gap: 6px; }
+.bcol { display: flex; flex-direction: column; gap: 2px; min-width: 0; align-items: flex-start; }
+.msg.theirs .bwrap:has(.brow) { max-width: 92%; }
+.bcol { max-width: calc(100% - 38px); }
