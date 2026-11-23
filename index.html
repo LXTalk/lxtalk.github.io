@@ -188,6 +188,10 @@
     </header>
     <div id="chat-list" class="chat-list" aria-live="polite"></div>
     <div id="chat-typing" class="typing" role="status" hidden>入力中…</div>
+    <div id="chat-reply-bar" class="edit-bar reply-bar" hidden>
+      <div class="reply-info"><span id="chat-reply-name" class="q-name"></span><span id="chat-reply-text" class="q-text"></span></div>
+      <button id="chat-reply-cancel" class="link" type="button" aria-label="返信をやめる">✕</button>
+    </div>
     <div id="chat-edit-bar" class="edit-bar" hidden>
       <span>メッセージを編集中</span>
       <button id="chat-edit-cancel" class="link" type="button">キャンセル</button>
