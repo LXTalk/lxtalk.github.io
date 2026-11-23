@@ -3,12 +3,11 @@
 import { uuid } from './uuid.js';
 import { fmtDate } from './format.js';
 import { createGroupUI } from './group.js';
+import { AVATAR_MAX_BYTES, AVATAR_TYPES, toAvatarBlob } from './avatar.js';
 import { normalizeUserId, validateUserId, validateDisplayName } from './validate.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const GENERIC_ERR = '通信エラー';
-const AVATAR_MAX_BYTES = 10 * 1024 * 1024;   // 選べる元画像の上限(端末側で256pxに縮小するので、保存されるのは小さい画像)
-const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const TITLES = { friends: '友達', groups: 'グループ', requests: '友達申請', add: '友達を追加', me: 'プロフィール' };
 
 export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
@@ -123,14 +122,14 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     if (error) return toast(GENERIC_ERR);
     groups = data || [];
     fill('#groups-list', '#groups-empty', groups.map((g) => {
-      const li = rowNode({ display_name: g.name }, [], `${g.member_count}人`);
+      const li = rowNode({ display_name: g.name, avatar_path: g.avatar_path }, [], `${g.member_count}人`);
       li.classList.add('clickable');
       li.addEventListener('click', () => onOpenChat(toGroupObj(g), { ...me }));
       return li;
     }));
   }
   let groups = [];
-  const toGroupObj = (g) => ({ type: 'group', conversation_id: g.conversation_id, display_name: g.name, member_count: g.member_count, role: g.role });
+  const toGroupObj = (g) => ({ type: 'group', conversation_id: g.conversation_id, display_name: g.name, member_count: g.member_count, role: g.role, avatar_path: g.avatar_path || null });
 
   function friendMenu(f) {
     openSheet(`${f.display_name} (@${f.user_id})`, [
@@ -300,24 +299,6 @@ export function createHome({ supabase, toast, onLogout, onOpenChat, push }) {
     } finally {
       btn.disabled = false;
     }
-  }
-
-  // 画像は端末側で正方形に切り抜き・256px に再エンコードしてから送る
-  // (サーバー側でも 2MB・JPEG/PNG/WebP のみに制限している)
-  async function toAvatarBlob(file) {
-    const bmp = await createImageBitmap(file);
-    const size = 256;
-    const side = Math.min(bmp.width, bmp.height);
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    canvas.getContext('2d').drawImage(
-      bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
-    bmp.close?.();
-    const toBlob = (type, q) => new Promise((r) => canvas.toBlob(r, type, q));
-    const webp = await toBlob('image/webp', 0.85);
-    if (webp && webp.type === 'image/webp') return { blob: webp, ext: 'webp' };
-    const jpg = await toBlob('image/jpeg', 0.88);
-    return { blob: jpg, ext: 'jpg' };
   }
 
   async function onPickAvatar(e) {

@@ -1,5 +1,8 @@
 // グループの作成・メンバー管理の画面。ユーザー入力は必ず textContent で描画する(XSS対策)
 // 権限の判定は必ずサーバー側(RPC)で行う。ここでの表示の出し分けは見た目だけ。
+import { uuid } from './uuid.js';
+import { AVATAR_MAX_BYTES, AVATAR_TYPES, toAvatarBlob } from './avatar.js';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const MAX = 50;
 const ERR = '操作できませんでした。時間をおいてお試しください';
@@ -18,6 +21,16 @@ function btn(label, cls, onClick) {
 }
 function avatar(name) {
   return el('span', 'avatar', Array.from(name || '?')[0] || '?');
+}
+// グループのアイコン(未設定・読み込み失敗時は頭文字)
+function groupAvatar(supabase, g, large) {
+  const fallback = () => el('span', 'avatar' + (large ? ' lg' : ''), Array.from(g.display_name || '?')[0] || '?');
+  if (!g.avatar_path) return fallback();
+  const img = el('img', 'avatar' + (large ? ' lg' : ''));
+  img.alt = '';
+  img.src = supabase.storage.from('avatars').getPublicUrl(g.avatar_path).data.publicUrl;
+  img.addEventListener('error', () => img.replaceWith(fallback()), { once: true });
+  return img;
 }
 
 export function createGroupUI({ supabase, toast }) {
@@ -110,7 +123,16 @@ export function createGroupUI({ supabase, toast }) {
     };
 
     function home() {
-      const nodes = [el('h2', 'gtitle', group.display_name), el('p', 'muted small', `メンバー ${current.length}人`)];
+      const nodes = [];
+      const icon = el('div', 'gicon');
+      icon.append(groupAvatar(supabase, group, true));
+      if (isOwner) {
+        const ib = el('div', 'gicon-btns');
+        ib.append(btn(group.avatar_path ? 'アイコンを変更' : 'アイコンを設定', 'btn-sm', () => fileIn.click()));
+        if (group.avatar_path) ib.append(btn('アイコンを削除', 'btn-sm danger', removeIcon));
+        icon.append(ib);
+      }
+      nodes.push(icon, el('h2', 'gtitle', group.display_name), el('p', 'muted small', `メンバー ${current.length}人`));
       const ul = el('ul', 'rows');
       for (const m of current) {
         const li = el('li', 'row');
@@ -139,7 +161,11 @@ export function createGroupUI({ supabase, toast }) {
           btn('メンバーを追加', 'btn-sm', addView),
           btn('グループ名を変更', 'btn-sm', renameView),
           btn('グループを削除', 'btn-sm danger', () => confirmView('グループを削除しますか?全員のメッセージとファイルが消え、元に戻せません。', '削除する', async () => {
-            if (await rpc('delete_group', { p_conversation_id: group.conversation_id }) === true) { close(); onGone('deleted'); } else toast('削除できませんでした');
+            const icon = group.avatar_path;
+            if (await rpc('delete_group', { p_conversation_id: group.conversation_id }) === true) {
+              if (icon) supabase.storage.from('avatars').remove([icon]);   // 画像本体も片付ける(失敗しても影響なし)
+              close(); onGone('deleted');
+            } else toast('削除できませんでした');
           })));
       } else {
         acts.append(btn('グループを退出', 'btn-sm danger', () => confirmView('このグループを退出しますか?退出すると、このグループのメッセージは見られなくなります。', '退出する', async () => {
@@ -148,7 +174,45 @@ export function createGroupUI({ supabase, toast }) {
       }
       acts.appendChild(btn('閉じる', 'btn-sm', close));
       nodes.push(acts);
+      nodes.push(fileIn);
       show(nodes);
+    }
+
+    // ---- アイコン ----
+    const fileIn = document.createElement('input');
+    fileIn.type = 'file'; fileIn.accept = AVATAR_TYPES.join(','); fileIn.hidden = true;
+    fileIn.addEventListener('change', async () => {
+      const file = fileIn.files?.[0];
+      fileIn.value = '';
+      if (!file) return;
+      if (!AVATAR_TYPES.includes(file.type)) return toast('JPEG・PNG・WebP の画像を選んでください');
+      if (file.size > AVATAR_MAX_BYTES) return toast('画像は10MB以下にしてください');
+      let processed;
+      try { processed = await toAvatarBlob(file); } catch { return toast('画像を読み込めませんでした'); }
+      const path = `${meId}/${uuid()}.${processed.ext}`;
+      const up = await supabase.storage.from('avatars').upload(path, processed.blob, { contentType: processed.blob.type, upsert: false });
+      if (up.error) return toast('アイコンを保存できませんでした');
+      const r = await rpc('set_group_avatar', { p_conversation_id: group.conversation_id, p_path: path });
+      if (r !== true) {
+        await supabase.storage.from('avatars').remove([path]);
+        if (r === false) toast('アイコンを変更できませんでした');
+        return;
+      }
+      const old = group.avatar_path;
+      group.avatar_path = path;
+      if (old) supabase.storage.from('avatars').remove([old]);
+      toast('アイコンを変更しました');
+      onChanged({ avatar_path: path });
+      home();
+    });
+    async function removeIcon() {
+      const old = group.avatar_path;
+      const r = await rpc('set_group_avatar', { p_conversation_id: group.conversation_id, p_path: null });
+      if (r !== true) { if (r === false) toast('アイコンを削除できませんでした'); return; }
+      group.avatar_path = null;
+      if (old) supabase.storage.from('avatars').remove([old]);
+      onChanged({ avatar_path: null });
+      home();
     }
 
     function confirmView(text, label, run) {
@@ -167,7 +231,7 @@ export function createGroupUI({ supabase, toast }) {
         if (!v) return;
         save.disabled = true;
         const r = await rpc('rename_group', { p_conversation_id: group.conversation_id, p_name: v });
-        if (r === true) { group.display_name = v; onChanged(v); home(); } else { save.disabled = false; if (r === false) toast('変更できませんでした'); }
+        if (r === true) { group.display_name = v; onChanged({ name: v }); home(); } else { save.disabled = false; if (r === false) toast('変更できませんでした'); }
       });
       show([el('h2', 'gtitle', 'グループ名を変更'), input, el('div', 'gbtns')]);
       box().lastChild.append(btn('キャンセル', 'btn-sm', home), save);
