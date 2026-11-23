@@ -446,10 +446,8 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
 
   function messageMenu(m) {
     const actions = [];
-    if (m.sender_id !== me.id) {
-      actions.push({ label: '返信する', run: () => startReply(m) });
-      return openSheet('メッセージの操作', actions);
-    }
+    actions.push({ label: '返信する', run: () => startReply(m) });
+    if (m.sender_id !== me.id) return openSheet('メッセージの操作', actions);
     if (m.kind === 'text') actions.push({ label: '編集する', run: () => startEdit(m) });
     actions.push({ label: '削除する', danger: true, run: () => confirmDelete(m) });
     openSheet('メッセージの操作', actions);
