@@ -236,8 +236,18 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
       meta.prepend(more);
     }
     const wrap = el('div', 'bwrap');
-    if (isGroup && !mine) wrap.appendChild(el('div', 'sender', nameOf(m.sender_id)));
-    wrap.append(bubble, meta);
+    if (isGroup && !mine) {
+      // 名前の下に、アイコン(左)+メッセージ
+      wrap.appendChild(el('div', 'sender', nameOf(m.sender_id)));
+      const brow = el('div', 'brow');
+      const col = el('div', 'bcol');
+      col.append(bubble, meta);
+      const who = members.get(m.sender_id) || { display_name: '?' };
+      brow.append(headAvatar(who, 'sm'), col);
+      wrap.appendChild(brow);
+    } else {
+      wrap.append(bubble, meta);
+    }
     row.appendChild(wrap);
     return row;
   }
@@ -631,11 +641,12 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
     });
   }
 
-  function headAvatar(p) {
+  function headAvatar(p, size) {
     const initial = Array.from(p.display_name || '?')[0] || '?';
-    const fallback = () => el('span', 'avatar', initial);
+    const cls = 'avatar' + (size ? ' ' + size : '');
+    const fallback = () => el('span', cls, initial);
     if (!p.avatar_path) return fallback();
-    const img = el('img', 'avatar');
+    const img = el('img', cls);
     img.alt = '';
     img.src = supabase.storage.from('avatars').getPublicUrl(p.avatar_path).data.publicUrl;
     img.addEventListener('error', () => img.replaceWith(fallback()), { once: true });
