@@ -7,9 +7,10 @@ import {
 import { createHome } from './home.js';
 import { createChat } from './chat.js';
 import { createPush } from './push.js';
+import { createShare, readInbox } from './share.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const views = ['loading', 'offline', 'login', 'signup', 'verify', 'home', 'chat'];
+const views = ['loading', 'offline', 'login', 'signup', 'verify', 'home', 'chat', 'share'];
 
 const configured = !SUPABASE_URL.includes('YOUR-PROJECT') && !SUPABASE_ANON_KEY.includes('YOUR-ANON');
 const supabase = configured
@@ -26,6 +27,19 @@ const home = supabase ? createHome({
   onLogout: async () => { if (push) await push.disable(); chat.close(); home.unmount(); await supabase.auth.signOut(); show('login'); },
   onOpenChat: (friend, me) => { chat.open(friend, me); show('chat'); },
 }) : null;
+
+const share = supabase ? createShare({
+  supabase,
+  onPick: (target) => {
+    const payload = pendingShare; pendingShare = null;
+    chat.open(target, home.getMe(), payload); show('chat');
+  },
+  onCancel: () => { pendingShare = null; show('home'); },
+}) : null;
+
+// 他のアプリの「共有」から来た内容(送信先を選ぶまで、この画面のメモリにだけ保持する)
+let pendingShare = null;
+let sharePromise = Promise.resolve();
 
 let pendingEmail = '';
 const otpLimiter = createAttemptLimiter({ max: 5, lockMs: 5 * 60 * 1000 });
@@ -221,6 +235,8 @@ async function enterHome() {
   home.mount(profile);
   show('home');
   if (push) push.sync();
+  await sharePromise;
+  if (pendingShare) { await share.show(home.getMe(), pendingShare); show('share'); return; }
   await handleOpen(takePendingOpen());
 }
 
@@ -256,6 +272,10 @@ function receiveOpen(u) {
 if (location.search.includes('open=')) {
   pendingOpen = parseOpen(location.href);
   history.replaceState(null, '', location.pathname); // URLに情報を残さない
+}
+if (location.search.includes('share=1')) {
+  history.replaceState(null, '', location.pathname);
+  sharePromise = readInbox().then((p) => { pendingShare = p; }).catch(() => {});
 }
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => {

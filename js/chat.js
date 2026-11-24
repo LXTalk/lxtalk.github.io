@@ -497,6 +497,11 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || busy) return;
+    await sendFileObj(file);
+  }
+
+  async function sendFileObj(file) {
+    if (busy || !convId) return;
     // 種類(拡張子・形式)は制限しない。容量のみ10MBまで(サーバー側でも強制)
     if (file.size > MAX_FILE_BYTES) return toast('ファイルは10MB以下にしてください');
     busy = true;
@@ -654,7 +659,27 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
   }
 
   // ---------- 公開API ----------
-  function open(f, meProfile) {
+  // 他のアプリから共有された内容: テキストは入力欄に入れ(送信は本人)、ファイルは順に送る(最大10件)
+  function applyShare(payload) {
+    const cid = convId;
+    if (payload.text) {
+      const ta = $('#chat-input');
+      ta.value = String(payload.text).slice(0, 4000);
+      autosize();
+      ta.focus();
+    }
+    const files = (payload.files || []).slice(0, 10);
+    if (!files.length) return;
+    (async () => {
+      for (const f of files) {
+        while (busy) await new Promise((r) => setTimeout(r, 200));
+        if (convId !== cid) return;
+        await sendFileObj(f);
+      }
+    })();
+  }
+
+  function open(f, meProfile, payload = null) {
     wire();
     close();
     me = meProfile;
@@ -682,6 +707,7 @@ export function createChat({ supabase, toast, onClose, onGroupsChanged = () => {
     clearInterval(readsTimer);
     readsTimer = setInterval(refreshReads, 10000);
     loadLatest();
+    if (payload) applyShare(payload);
     // 入力中(broadcast): 会話の参加者だけが送受信できる(サーバー側のRLSで制限)
     typingChannel = supabase.channel('lx-chat-' + convId, { config: { private: true } })
       .on('broadcast', { event: 'typing' }, (msg) => { if (msg?.payload?.u && msg.payload.u !== me.id) showTyping(msg.payload.u); })
