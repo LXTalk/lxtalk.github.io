@@ -175,6 +175,24 @@
     <div id="viewer-media" class="viewer-media"></div>
   </dialog>
 
+  <section id="view-share" class="view share" hidden>
+    <header class="chat-head">
+      <button id="share-back" class="back" type="button" aria-label="キャンセル">‹</button>
+      <div class="chat-names">
+        <span class="dn">送信先を選択</span>
+        <span id="share-what" class="uid"></span>
+      </div>
+    </header>
+    <div class="share-body">
+      <h2 class="share-h">友達</h2>
+      <ul id="share-friends" class="rows"></ul>
+      <p id="share-friends-empty" class="muted small" hidden>友達がいません</p>
+      <h2 class="share-h">グループ</h2>
+      <ul id="share-groups" class="rows"></ul>
+      <p id="share-groups-empty" class="muted small" hidden>グループがありません</p>
+    </div>
+  </section>
+
   <section id="view-chat" class="view chat" hidden>
     <header class="chat-head">
       <button id="chat-back" class="back" type="button" aria-label="戻る">‹</button>
