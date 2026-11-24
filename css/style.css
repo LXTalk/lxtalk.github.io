@@ -205,3 +205,9 @@ dialog.gdialog { max-height: 88dvh; overflow-y: auto; }
 .bcol { display: flex; flex-direction: column; gap: 2px; min-width: 0; align-items: flex-start; }
 .msg.theirs .bwrap:has(.brow) { max-width: 92%; }
 .bcol { max-width: calc(100% - 38px); }
+
+/* 共有の送信先選択 */
+.view.share { padding: 0 0 32px; min-height: 100vh; }
+.view.share .chat-head { position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.share-body { padding: 0 16px; }
+.share-h { font-size: 15px; font-weight: 600; color: var(--muted); margin: 16px 0 4px; }
